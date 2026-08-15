@@ -1,13 +1,14 @@
+const express = require("express");
 const mongoose = require("mongoose");
-const Product = require("./models/Product");
+const Product = require("../models/Product");
+const Order = require("../models/Order");
 
-const MONGODB_URI = process.env.MONGODB_URI || "mongodb://127.0.0.1:27017/ministore";
+const app = express();
 
-mongoose.connect(MONGODB_URI)
-  .then(() => console.log("✅ MongoDB connected for seeding"))
-  .catch(err => console.error("❌ MongoDB connection error:", err));
+app.use(express.json());
 
-const products = [
+// Fallback product data matching the database seed
+const fallbackProducts = [
   {
     name: 'Wireless Headphones',
     price: 2999,
@@ -110,16 +111,95 @@ const products = [
   }
 ];
 
-async function seedDB() {
+let isConnected = false;
+
+async function connectDB() {
+  if (isConnected && mongoose.connection.readyState === 1) {
+    return true;
+  }
+  const mongoUri = process.env.MONGODB_URI || "mongodb://127.0.0.1:27017/ministore";
   try {
-    await Product.deleteMany({});
-    await Product.insertMany(products);
-    console.log("🌱 Database successfully seeded with products");
+    await mongoose.connect(mongoUri, {
+      serverSelectionTimeoutMS: 5000,
+    });
+    isConnected = true;
+    console.log("✅ MongoDB connected successfully");
+    return true;
   } catch (err) {
-    console.error("❌ Seeding error:", err);
-  } finally {
-    mongoose.connection.close();
+    console.warn("⚠️ MongoDB connection notice:", err.message);
+    return false;
   }
 }
 
-seedDB();
+// GET /products
+app.get("/products", async (req, res) => {
+  try {
+    const dbOk = await connectDB();
+    if (dbOk) {
+      const products = await Product.find();
+      if (products && products.length > 0) {
+        return res.json(products);
+      }
+    }
+    // Return fallback products if DB empty or unavailable
+    res.json(fallbackProducts);
+  } catch (err) {
+    console.error("Products endpoint error:", err);
+    res.json(fallbackProducts);
+  }
+});
+
+// POST /order
+app.post("/order", async (req, res) => {
+  try {
+    const { name, email, phone, address, city, state, pincode, items, total, paymentMethod } = req.body;
+
+    if (!name || !email || !address) {
+      return res.status(400).json({ success: false, error: "Missing required order information." });
+    }
+
+    // Validate and calculate total server-side
+    let calculatedTotal = 0;
+    if (Array.isArray(items)) {
+      calculatedTotal = items.reduce((sum, item) => {
+        const itemPrice = Number(item.price) || 0;
+        const itemQty = Number(item.quantity) || 1;
+        return sum + (itemPrice * itemQty);
+      }, 0);
+    }
+    const finalTotal = calculatedTotal > 0 ? calculatedTotal : Number(total) || 0;
+
+    const generatedOrderId = "CN-" + Math.floor(100000 + Math.random() * 900000);
+
+    const dbOk = await connectDB();
+    if (dbOk) {
+      const order = new Order({
+        name,
+        email,
+        phone: phone || "",
+        address: [address, city, state, pincode].filter(Boolean).join(", "),
+        city: city || "",
+        state: state || "",
+        pincode: pincode || "",
+        items: items || [],
+        total: finalTotal,
+        paymentMethod: paymentMethod || "Cash on Delivery",
+        orderId: generatedOrderId,
+      });
+      await order.save();
+    }
+
+    res.status(201).json({
+      success: true,
+      message: "Order placed successfully!",
+      orderId: generatedOrderId,
+      total: finalTotal,
+      customer: { name, email, address, city, state, pincode }
+    });
+  } catch (err) {
+    console.error("❌ Error placing order:", err);
+    res.status(500).json({ success: false, error: "Failed to place order. Please try again." });
+  }
+});
+
+module.exports = app;

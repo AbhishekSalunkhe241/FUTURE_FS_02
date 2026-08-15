@@ -1,0 +1,7 @@
+{
+  "version": 2,
+  "rewrites": [
+    { "source": "/products", "destination": "/api/index.js" },
+    { "source": "/order", "destination": "/api/index.js" }
+  ]
+}
