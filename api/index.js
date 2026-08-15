@@ -1,11 +1,19 @@
 const express = require("express");
 const mongoose = require("mongoose");
+const path = require("path");
 const Product = require("../models/Product");
 const Order = require("../models/Order");
 
 const app = express();
 
 app.use(express.json());
+app.use(express.static(path.join(__dirname, "../public")));
+
+app.get("/", (req, res) => {
+  res.sendFile(path.join(__dirname, "../public/index.html"));
+});
+
+
 
 // Fallback product data matching the database seed
 const fallbackProducts = [
